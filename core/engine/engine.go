@@ -237,7 +237,7 @@ func (e *Engine) SetConnections(n int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if !e.running || e.paused || n < 0 {
+	if !e.running || e.paused || n < 1 {
 		return
 	}
 
