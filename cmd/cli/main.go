@@ -15,6 +15,7 @@ import (
 	"github.com/ayush18/networkbooster/core/daemon"
 	"github.com/ayush18/networkbooster/core/engine"
 	"github.com/ayush18/networkbooster/core/metrics"
+	"github.com/ayush18/networkbooster/core/optimizer"
 	"github.com/ayush18/networkbooster/core/safety"
 	"github.com/ayush18/networkbooster/core/scheduler"
 	"github.com/ayush18/networkbooster/core/sources"
@@ -454,8 +455,65 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+var optimizeCmd = &cobra.Command{
+	Use:   "optimize",
+	Short: "Optimize system network settings for maximum speed (requires sudo)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println("NetworkBooster — System Network Optimizer")
+		fmt.Println(strings.Repeat("=", 50))
+		fmt.Println()
+
+		fmt.Println("Testing DNS servers...")
+		result := optimizer.Optimize()
+
+		fmt.Println()
+		for _, t := range result.Tweaks {
+			if t.Error != "" {
+				fmt.Printf("  %-35s  FAILED  %s\n", t.Name, t.Error)
+			} else if t.Applied {
+				fmt.Printf("  %-35s  OK      %s -> %s\n", t.Name, t.Before, t.After)
+			}
+		}
+
+		fmt.Println()
+		applied := 0
+		for _, t := range result.Tweaks {
+			if t.Applied {
+				applied++
+			}
+		}
+		fmt.Printf("Done! %d/%d optimizations applied.\n", applied, len(result.Tweaks))
+		fmt.Println()
+		fmt.Println("To undo all changes: networkbooster reset")
+		return nil
+	},
+}
+
+var resetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "Reset network settings to macOS defaults (requires sudo)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println("Resetting network settings to defaults...")
+		fmt.Println()
+
+		result := optimizer.Reset()
+
+		for _, t := range result.Tweaks {
+			if t.Error != "" {
+				fmt.Printf("  %-35s  FAILED  %s\n", t.Name, t.Error)
+			} else if t.Applied {
+				fmt.Printf("  %-35s  OK      -> %s\n", t.Name, t.After)
+			}
+		}
+
+		fmt.Println()
+		fmt.Println("Network settings restored to defaults.")
+		return nil
+	},
+}
+
 func main() {
-	rootCmd.AddCommand(startCmd, statusCmd, historyCmd, scheduleCmd, daemonCmd, configCmd)
+	rootCmd.AddCommand(startCmd, statusCmd, historyCmd, scheduleCmd, daemonCmd, configCmd, optimizeCmd, resetCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
