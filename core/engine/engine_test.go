@@ -105,3 +105,31 @@ func TestEngine_DoubleStartReturnsError(t *testing.T) {
 	err := eng.Start(engine.ModeDownload)
 	assert.Error(t, err, "starting an already running engine should error")
 }
+
+func TestEngine_Pause_Resume(t *testing.T) {
+	ts := testutil.NewTestServer()
+	defer ts.Close()
+
+	reg := sources.NewRegistry()
+	sh := sources.NewSelfHostedSource(ts.URL + "/download")
+	reg.Register(sh)
+
+	eng := engine.New(reg, engine.Options{Connections: 2})
+	eng.Start(engine.ModeDownload)
+	defer eng.Stop()
+
+	time.Sleep(200 * time.Millisecond)
+	assert.Greater(t, eng.Status().Snapshot.ActiveConnections, 0)
+	assert.False(t, eng.IsPaused())
+
+	eng.Pause()
+	time.Sleep(100 * time.Millisecond)
+	assert.True(t, eng.IsPaused())
+	assert.Equal(t, 0, eng.Status().Snapshot.ActiveConnections)
+	assert.True(t, eng.Status().Running, "engine should still be 'running' while paused")
+
+	eng.Resume()
+	time.Sleep(200 * time.Millisecond)
+	assert.False(t, eng.IsPaused())
+	assert.Greater(t, eng.Status().Snapshot.ActiveConnections, 0)
+}

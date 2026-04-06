@@ -24,6 +24,7 @@ type Options struct {
 
 type Status struct {
 	Running  bool
+	Paused   bool
 	Mode     Mode
 	Snapshot metrics.Snapshot
 }
@@ -33,11 +34,13 @@ type Engine struct {
 	opts      Options
 	collector *metrics.Collector
 
-	mu      sync.Mutex
-	running bool
-	mode    Mode
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	mu         sync.Mutex
+	running    bool
+	paused     bool
+	mode       Mode
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	discovered []sources.DiscoveredServer
 }
 
 func New(registry *sources.Registry, opts Options) *Engine {
@@ -69,16 +72,24 @@ func (e *Engine) Start(mode Mode) error {
 
 	e.collector.Reset()
 	e.running = true
+	e.paused = false
 	e.mode = mode
+	e.discovered = discovered
 
+	e.launchWorkers()
+	return nil
+}
+
+// launchWorkers starts worker goroutines. Must be called with e.mu held.
+func (e *Engine) launchWorkers() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
 
 	for i := 0; i < e.opts.Connections; i++ {
-		ds := discovered[i%len(discovered)]
+		ds := e.discovered[i%len(e.discovered)]
 		workerID := fmt.Sprintf("worker-%d", i)
 
-		switch mode {
+		switch e.mode {
 		case ModeDownload:
 			w := NewWorker(workerID, ds.Source, ds.Server, e.collector)
 			e.wg.Add(1)
@@ -123,8 +134,6 @@ func (e *Engine) Start(mode Mode) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 func (e *Engine) Stop() error {
@@ -140,18 +149,57 @@ func (e *Engine) Stop() error {
 
 	e.mu.Lock()
 	e.running = false
+	e.paused = false
 	e.mu.Unlock()
 	return nil
+}
+
+// Pause stops all workers but keeps the engine in running state.
+// Call Resume() to restart workers.
+func (e *Engine) Pause() {
+	e.mu.Lock()
+	if !e.running || e.paused {
+		e.mu.Unlock()
+		return
+	}
+	e.cancel()
+	e.mu.Unlock()
+
+	e.wg.Wait()
+
+	e.mu.Lock()
+	e.paused = true
+	e.mu.Unlock()
+}
+
+// Resume restarts workers after a Pause.
+func (e *Engine) Resume() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.running || !e.paused {
+		return
+	}
+	e.paused = false
+	e.launchWorkers()
+}
+
+// IsPaused returns whether the engine is paused.
+func (e *Engine) IsPaused() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.paused
 }
 
 func (e *Engine) Status() Status {
 	e.mu.Lock()
 	running := e.running
+	paused := e.paused
 	mode := e.mode
 	e.mu.Unlock()
 
 	return Status{
 		Running:  running,
+		Paused:   paused,
 		Mode:     mode,
 		Snapshot: e.collector.Snapshot(),
 	}
