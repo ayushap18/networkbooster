@@ -37,6 +37,8 @@ type serverAccum struct {
 	upload   int64
 }
 
+const smoothingWindowSize = 5
+
 type Collector struct {
 	mu sync.RWMutex
 
@@ -58,6 +60,10 @@ type Collector struct {
 	speedSamples         int
 	totalDlMbps          float64
 	totalUlMbps          float64
+
+	// Rolling speed smoothing
+	recentDl []float64
+	recentUl []float64
 }
 
 func NewCollector() *Collector {
@@ -125,24 +131,44 @@ func (c *Collector) Snapshot() Snapshot {
 	dlBytes := c.windowDownload.Swap(0)
 	ulBytes := c.windowUpload.Swap(0)
 
-	dlMbps := float64(dlBytes) * 8.0 / (elapsed * 1_000_000)
-	ulMbps := float64(ulBytes) * 8.0 / (elapsed * 1_000_000)
+	instantDl := float64(dlBytes) * 8.0 / (elapsed * 1_000_000)
+	instantUl := float64(ulBytes) * 8.0 / (elapsed * 1_000_000)
 
 	c.mu.Lock()
 	c.windowStart = now
 
-	// Update peak
-	if dlMbps > c.peakDl {
-		c.peakDl = dlMbps
+	// Rolling window for smoothed display speed
+	c.recentDl = append(c.recentDl, instantDl)
+	if len(c.recentDl) > smoothingWindowSize {
+		c.recentDl = c.recentDl[len(c.recentDl)-smoothingWindowSize:]
 	}
-	if ulMbps > c.peakUl {
-		c.peakUl = ulMbps
+	c.recentUl = append(c.recentUl, instantUl)
+	if len(c.recentUl) > smoothingWindowSize {
+		c.recentUl = c.recentUl[len(c.recentUl)-smoothingWindowSize:]
+	}
+
+	var dlMbps, ulMbps float64
+	for _, v := range c.recentDl {
+		dlMbps += v
+	}
+	dlMbps /= float64(len(c.recentDl))
+	for _, v := range c.recentUl {
+		ulMbps += v
+	}
+	ulMbps /= float64(len(c.recentUl))
+
+	// Update peak (use instantaneous, not smoothed)
+	if instantDl > c.peakDl {
+		c.peakDl = instantDl
+	}
+	if instantUl > c.peakUl {
+		c.peakUl = instantUl
 	}
 
 	// Update running average
 	c.speedSamples++
-	c.totalDlMbps += dlMbps
-	c.totalUlMbps += ulMbps
+	c.totalDlMbps += instantDl
+	c.totalUlMbps += instantUl
 
 	peakDl := c.peakDl
 	peakUl := c.peakUl
@@ -188,6 +214,8 @@ func (c *Collector) Reset() {
 	c.speedSamples = 0
 	c.totalDlMbps = 0
 	c.totalUlMbps = 0
+	c.recentDl = nil
+	c.recentUl = nil
 	now := time.Now()
 	c.startTime = now
 	c.windowStart = now

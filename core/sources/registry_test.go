@@ -58,7 +58,9 @@ func TestRegistry_DiscoverAll(t *testing.T) {
 	discovered, err := reg.DiscoverAll()
 	require.NoError(t, err)
 	assert.Len(t, discovered, 2)
-	assert.Equal(t, "Server 1", discovered[0].Server.Name)
+	names := []string{discovered[0].Server.Name, discovered[1].Server.Name}
+	assert.Contains(t, names, "Server 1")
+	assert.Contains(t, names, "Server 2")
 }
 
 func TestRegistry_DiscoverAll_MultipleSources(t *testing.T) {

@@ -25,7 +25,7 @@ func TestSpeedtestSource_Name(t *testing.T) {
 func TestSpeedtestSource_BundledServers(t *testing.T) {
 	st := sources.NewSpeedtestSource()
 	bundled := st.BundledServers()
-	assert.GreaterOrEqual(t, len(bundled), 20, "should have at least 20 bundled servers")
+	assert.GreaterOrEqual(t, len(bundled), 10, "should have at least 10 bundled servers")
 	for _, s := range bundled {
 		assert.NotEmpty(t, s.ID, "bundled server ID must not be empty")
 		assert.NotEmpty(t, s.URL, "bundled server URL must not be empty")

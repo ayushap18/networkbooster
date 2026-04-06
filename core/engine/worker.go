@@ -3,13 +3,14 @@ package engine
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/ayush18/networkbooster/core/metrics"
 	"github.com/ayush18/networkbooster/core/sources"
 )
 
 const (
-	readBufSize     = 32 * 1024
+	readBufSize     = 256 * 1024 // 256KB for better throughput
 	uploadChunkSize = 1024 * 1024
 )
 
@@ -41,6 +42,12 @@ func (w *Worker) RunDownload(ctx context.Context) {
 		rc, err := w.source.Download(ctx, w.server)
 		if err != nil {
 			if ctx.Err() != nil {
+				return
+			}
+			// Back off before retrying to avoid tight error loops
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
 				return
 			}
 			continue
@@ -96,8 +103,16 @@ func (w *Worker) RunUpload(ctx context.Context) {
 		pr.Close()
 		<-done
 
-		if err != nil && ctx.Err() != nil {
-			return
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			// Back off before retrying
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

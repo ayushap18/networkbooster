@@ -12,33 +12,22 @@ import (
 const defaultSpeedtestServerListURL = "https://www.speedtest.net/speedtest-servers-static.php"
 
 var bundledSpeedtestServers = []Server{
-	// Hetzner speed test servers — reliable, support range requests, large files
-	{ID: "st-hetzner-de", Name: "Hetzner Germany", URL: "https://speed.hetzner.de/10GB.bin"},
+	// Hetzner — reliable, support range requests
 	{ID: "st-hetzner-us", Name: "Hetzner US (Ashburn)", URL: "https://ash-speed.hetzner.com/10GB.bin"},
 	{ID: "st-hetzner-fi", Name: "Hetzner Finland", URL: "https://hel1-speed.hetzner.com/10GB.bin"},
-	// Scaleway test files
-	{ID: "st-scaleway-fr", Name: "Scaleway France", URL: "https://multi.fr.apt.scaleway.com/linux/debian/ls-lR.gz"},
 	// Linode/Akamai speed test servers
 	{ID: "st-linode-us-east", Name: "Linode US East", URL: "https://speedtest.newark.linode.com/100MB-newark.bin"},
 	{ID: "st-linode-us-west", Name: "Linode US West", URL: "https://speedtest.fremont.linode.com/100MB-fremont.bin"},
 	{ID: "st-linode-eu", Name: "Linode EU (London)", URL: "https://speedtest.london.linode.com/100MB-london.bin"},
 	{ID: "st-linode-ap", Name: "Linode AP (Singapore)", URL: "https://speedtest.singapore.linode.com/100MB-singapore.bin"},
-	{ID: "st-linode-jp", Name: "Linode JP (Tokyo)", URL: "https://speedtest.tokyo2.linode.com/100MB-tokyo2.bin"},
 	// Vultr test files
 	{ID: "st-vultr-us", Name: "Vultr US (NJ)", URL: "https://nj-us-ping.vultr.com/vultr.com.100MB.bin"},
 	{ID: "st-vultr-eu", Name: "Vultr EU (Amsterdam)", URL: "https://ams-nl-ping.vultr.com/vultr.com.100MB.bin"},
 	{ID: "st-vultr-ap", Name: "Vultr AP (Singapore)", URL: "https://sgp-ping.vultr.com/vultr.com.100MB.bin"},
-	{ID: "st-vultr-au", Name: "Vultr AU (Sydney)", URL: "https://syd-au-ping.vultr.com/vultr.com.100MB.bin"},
-	{ID: "st-vultr-jp", Name: "Vultr JP (Tokyo)", URL: "https://hnd-jp-ping.vultr.com/vultr.com.100MB.bin"},
 	// OVH test files
 	{ID: "st-ovh-fr", Name: "OVH France", URL: "https://proof.ovh.net/files/100Mb.dat"},
-	{ID: "st-ovh-ca", Name: "OVH Canada", URL: "https://proof.ovh.ca/files/100Mb.dat"},
 	// Telia carrier test
 	{ID: "st-telia-se", Name: "Telia Sweden", URL: "http://speedtest.tele2.net/100MB.zip"},
-	// Clouvider looking glass
-	{ID: "st-clouvider-uk", Name: "Clouvider UK", URL: "https://lon.speedtest.clouvider.net/backend/garbage/100MB.bin"},
-	{ID: "st-clouvider-us", Name: "Clouvider US", URL: "https://dal.speedtest.clouvider.net/backend/garbage/100MB.bin"},
-	{ID: "st-clouvider-de", Name: "Clouvider DE", URL: "https://fra.speedtest.clouvider.net/backend/garbage/100MB.bin"},
 }
 
 // xmlSettings mirrors the Ookla speedtest-servers XML structure.
@@ -144,7 +133,6 @@ func (s *SpeedtestSource) Download(ctx context.Context, server Server) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Range", "bytes=0-104857599") // 100MB chunk
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
