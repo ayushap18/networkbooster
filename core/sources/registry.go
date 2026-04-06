@@ -54,7 +54,13 @@ func (r *Registry) DiscoverAll() ([]DiscoveredServer, error) {
 		return all, nil
 	}
 
-	// Probe latency on all servers concurrently, keep only reachable ones
+	// Cap servers to probe — Ookla can return hundreds
+	maxProbe := 30
+	if len(all) > maxProbe {
+		all = all[:maxProbe]
+	}
+
+	// Probe latency on servers concurrently, keep only reachable ones
 	type probeResult struct {
 		idx     int
 		latency time.Duration

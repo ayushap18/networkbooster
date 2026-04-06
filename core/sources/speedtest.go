@@ -4,31 +4,19 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const defaultSpeedtestServerListURL = "https://www.speedtest.net/speedtest-servers-static.php"
 
-var bundledSpeedtestServers = []Server{
-	// Hetzner — reliable, support range requests
-	{ID: "st-hetzner-us", Name: "Hetzner US (Ashburn)", URL: "https://ash-speed.hetzner.com/10GB.bin"},
-	{ID: "st-hetzner-fi", Name: "Hetzner Finland", URL: "https://hel1-speed.hetzner.com/10GB.bin"},
-	// Linode/Akamai speed test servers
-	{ID: "st-linode-us-east", Name: "Linode US East", URL: "https://speedtest.newark.linode.com/100MB-newark.bin"},
-	{ID: "st-linode-us-west", Name: "Linode US West", URL: "https://speedtest.fremont.linode.com/100MB-fremont.bin"},
-	{ID: "st-linode-eu", Name: "Linode EU (London)", URL: "https://speedtest.london.linode.com/100MB-london.bin"},
-	{ID: "st-linode-ap", Name: "Linode AP (Singapore)", URL: "https://speedtest.singapore.linode.com/100MB-singapore.bin"},
-	// Vultr test files
-	{ID: "st-vultr-us", Name: "Vultr US (NJ)", URL: "https://nj-us-ping.vultr.com/vultr.com.100MB.bin"},
-	{ID: "st-vultr-eu", Name: "Vultr EU (Amsterdam)", URL: "https://ams-nl-ping.vultr.com/vultr.com.100MB.bin"},
-	{ID: "st-vultr-ap", Name: "Vultr AP (Singapore)", URL: "https://sgp-ping.vultr.com/vultr.com.100MB.bin"},
-	// OVH test files
-	{ID: "st-ovh-fr", Name: "OVH France", URL: "https://proof.ovh.net/files/100Mb.dat"},
-	// Telia carrier test
-	{ID: "st-telia-se", Name: "Telia Sweden", URL: "http://speedtest.tele2.net/100MB.zip"},
-}
+// Ookla speedtest servers use this URL pattern for downloads.
+// random4000x4000.jpg is ~30MB of random data per request.
+const ooklaDownloadPath = "/speedtest/random4000x4000.jpg"
+const ooklaUploadPath = "/speedtest/upload.php"
 
 // xmlSettings mirrors the Ookla speedtest-servers XML structure.
 type xmlSettings struct {
@@ -37,6 +25,7 @@ type xmlSettings struct {
 
 type xmlServer struct {
 	URL     string `xml:"url,attr"`
+	Host    string `xml:"host,attr"`
 	Lat     string `xml:"lat,attr"`
 	Lon     string `xml:"lon,attr"`
 	Name    string `xml:"name,attr"`
@@ -63,7 +52,7 @@ func NewSpeedtestSourceWithURL(serverListURL string) *SpeedtestSource {
 	return &SpeedtestSource{
 		serverListURL: serverListURL,
 		client: &http.Client{
-			Timeout: 0, // no timeout — workers manage their own lifecycle via context
+			Timeout: 0, // no timeout — workers manage lifecycle via context
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 64,
 				IdleConnTimeout:     90 * time.Second,
@@ -75,15 +64,42 @@ func NewSpeedtestSourceWithURL(serverListURL string) *SpeedtestSource {
 func (s *SpeedtestSource) Name() string     { return "Speedtest" }
 func (s *SpeedtestSource) Type() SourceType { return SourceTypeSpeedtest }
 
-// BundledServers returns the hardcoded list of well-known speedtest servers.
+// BundledServers returns a small fallback list of known Ookla servers.
 func (s *SpeedtestSource) BundledServers() []Server {
-	out := make([]Server, len(bundledSpeedtestServers))
-	copy(out, bundledSpeedtestServers)
-	return out
+	return []Server{
+		{ID: "ookla-8795", Name: "Tripleplay – Noida, India", URL: "http://speedtestnoida.tripleplay.in:8080"},
+		{ID: "ookla-27751", Name: "Costel Networks – Noida, India", URL: "http://speedtest.costelnetworks.com:8080"},
+		{ID: "ookla-10020", Name: "Powernet – Gurgaon, India", URL: "http://spgur.pcpli.net:8080"},
+		{ID: "ookla-50174", Name: "Siti Broadband – Noida, India", URL: "http://noidaspeedtest.sitibroadband.co.in:8080"},
+		{ID: "ookla-36995", Name: "Cityline Networks – Greater Noida, India", URL: "http://citylinegrn.speedtest.bhaukaalbaba.com:8080"},
+		{ID: "ookla-16377", Name: "Airtel – Mumbai, India", URL: "http://speedtestmum.bharti.com:8080"},
+		{ID: "ookla-9214", Name: "BSNL – New Delhi, India", URL: "http://speedtest.bsnl.co.in:8080"},
+		{ID: "ookla-21070", Name: "Jio – Mumbai, India", URL: "http://speedtestmumbai.jio.com:8080"},
+		{ID: "ookla-27249", Name: "Excitel – New Delhi, India", URL: "http://speedtest1.excitel.com:8080"},
+		{ID: "ookla-15312", Name: "ACT Fibernet – Bangalore, India", URL: "http://speedtest.actcorp.in:8080"},
+	}
 }
 
-// Discover attempts a live XML fetch from the Ookla server list. If that
-// fails for any reason it falls back to the bundled servers.
+// ooklaBaseURL extracts the base URL from an Ookla server XML entry.
+// XML gives: "http://host:port/speedtest/upload.php" or host attr: "host:port"
+// We need: "http://host:port"
+func ooklaBaseURL(xmlURL, host string) string {
+	// If host attr is available, use it
+	if host != "" {
+		return "http://" + host
+	}
+	// Strip the path from the URL
+	if idx := strings.Index(xmlURL, "/speedtest/"); idx > 0 {
+		return xmlURL[:idx]
+	}
+	// Strip trailing upload.php or similar
+	if idx := strings.LastIndex(xmlURL, "/"); idx > 8 { // after http://
+		return xmlURL[:idx]
+	}
+	return xmlURL
+}
+
+// Discover fetches the Ookla server list, falls back to bundled on failure.
 func (s *SpeedtestSource) Discover() ([]Server, error) {
 	servers, err := s.fetchLiveServers()
 	if err != nil || len(servers) == 0 {
@@ -94,7 +110,8 @@ func (s *SpeedtestSource) Discover() ([]Server, error) {
 
 // fetchLiveServers fetches and parses the Ookla XML server list.
 func (s *SpeedtestSource) fetchLiveServers() ([]Server, error) {
-	resp, err := s.client.Get(s.serverListURL)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(s.serverListURL)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +122,7 @@ func (s *SpeedtestSource) fetchLiveServers() ([]Server, error) {
 	}
 
 	var settings xmlSettings
-	if err := xml.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&settings); err != nil {
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&settings); err != nil {
 		return nil, err
 	}
 
@@ -114,22 +131,27 @@ func (s *SpeedtestSource) fetchLiveServers() ([]Server, error) {
 		if xs.URL == "" || xs.ID == "" {
 			continue
 		}
+		baseURL := ooklaBaseURL(xs.URL, xs.Host)
 		name := xs.Name
 		if xs.Sponsor != "" {
-			name = xs.Sponsor + " – " + xs.Name + ", " + xs.Country
+			name = fmt.Sprintf("%s – %s, %s", xs.Sponsor, xs.Name, xs.Country)
 		}
 		servers = append(servers, Server{
 			ID:   "ookla-" + xs.ID,
 			Name: name,
-			URL:  xs.URL,
+			URL:  baseURL,
 		})
+	}
+	if len(servers) == 0 {
+		return nil, errors.New("no servers in list")
 	}
 	return servers, nil
 }
 
-// Download performs an HTTP GET to server.URL and returns the response body.
+// Download requests random data from the Ookla server's download endpoint.
 func (s *SpeedtestSource) Download(ctx context.Context, server Server) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	dlURL := server.URL + ooklaDownloadPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -137,16 +159,17 @@ func (s *SpeedtestSource) Download(ctx context.Context, server Server) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, errors.New("unexpected status: " + resp.Status)
+		return nil, errors.New("download failed: " + resp.Status)
 	}
 	return resp.Body, nil
 }
 
-// Upload performs an HTTP POST to server.URL with r as the request body.
+// Upload POSTs data to the Ookla server's upload endpoint.
 func (s *SpeedtestSource) Upload(ctx context.Context, server Server, r io.Reader) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, r)
+	ulURL := server.URL + ooklaUploadPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ulURL, r)
 	if err != nil {
 		return err
 	}
@@ -162,14 +185,13 @@ func (s *SpeedtestSource) Upload(ctx context.Context, server Server, r io.Reader
 	return nil
 }
 
-// Latency measures round-trip time to server.URL using a HEAD request.
+// Latency measures round-trip time using a small HTTP GET to the server.
 func (s *SpeedtestSource) Latency(server Server) (time.Duration, error) {
+	// Use /speedtest/latency.txt — standard Ookla latency endpoint
+	latURL := server.URL + "/speedtest/latency.txt"
+	client := &http.Client{Timeout: 5 * time.Second}
 	start := time.Now()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodHead, server.URL, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := s.client.Do(req)
+	resp, err := client.Get(latURL)
 	if err != nil {
 		return 0, err
 	}

@@ -169,9 +169,8 @@ func buildEngine(cfg config.Config) (*engine.Engine, engine.Mode) {
 		mode = engine.ModeDownload
 	}
 
-	// Build source registry
+	// Build source registry — Speedtest source discovers nearest servers via Ookla
 	reg := sources.NewRegistry()
-	reg.Register(sources.NewCDNSource())
 	reg.Register(sources.NewSpeedtestSource())
 	if cfg.SelfHostedURL != "" {
 		reg.Register(sources.NewSelfHostedSource(cfg.SelfHostedURL))
