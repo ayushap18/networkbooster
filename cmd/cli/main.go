@@ -178,6 +178,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 func runHistory(cmd *cobra.Command, args []string) error {
 	dbPath := historyDBPath()
+	os.MkdirAll(filepath.Dir(dbPath), 0755)
 	hist, err := metrics.NewHistory(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open history: %w", err)
