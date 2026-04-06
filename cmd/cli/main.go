@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/ayush18/networkbooster/config"
 	"github.com/ayush18/networkbooster/core/engine"
 	"github.com/ayush18/networkbooster/core/metrics"
+	"github.com/ayush18/networkbooster/core/safety"
 	"github.com/ayush18/networkbooster/core/sources"
 	"github.com/ayush18/networkbooster/ui/tui"
 	"github.com/spf13/cobra"
@@ -134,10 +137,40 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start engine: %w", err)
 	}
 
+	// Build and start safety monitor
+	var checks []safety.Check
+	if cfg.Safety.MaxDownloadMbps > 0 || cfg.Safety.MaxUploadMbps > 0 {
+		checks = append(checks, safety.NewBandwidthCheck(cfg.Safety.MaxDownloadMbps, cfg.Safety.MaxUploadMbps))
+	}
+	if cfg.Safety.DailyDataLimitGB > 0 {
+		limitBytes := int64(cfg.Safety.DailyDataLimitGB * 1024 * 1024 * 1024)
+		checks = append(checks, safety.NewDataLimitCheck(limitBytes))
+	}
+	if cfg.Safety.MaxCPUPercent > 0 {
+		checks = append(checks, safety.NewCPUCheck(cfg.Safety.MaxCPUPercent))
+	}
+	if cfg.Safety.MaxTempCelsius > 0 {
+		checks = append(checks, safety.NewTemperatureCheck(cfg.Safety.MaxTempCelsius))
+	}
+
+	safetyCtx, safetyCancel := context.WithCancel(context.Background())
+	monitor := safety.NewMonitor(checks)
+	go monitor.RunLoop(safetyCtx, eng.Collector(), func(result safety.CheckResult) {
+		switch result.Action {
+		case safety.ActionPause:
+			log.Printf("[safety] PAUSE: %s", result.Reason)
+			eng.Pause()
+		case safety.ActionThrottle:
+			log.Printf("[safety] THROTTLE to %d conns: %s", result.Target, result.Reason)
+			// For now, just log. Dynamic connection adjustment will come in a future phase.
+		}
+	})
+
 	// Run TUI (blocks until user quits)
 	tuiErr := tui.Run(eng, compactFlag)
 
-	// Stop engine after TUI exits
+	// Stop safety monitor and engine
+	safetyCancel()
 	eng.Stop()
 	status := eng.Status()
 
