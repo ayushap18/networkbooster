@@ -10,8 +10,8 @@ import (
 
 var defaultCDNServers = []Server{
 	{ID: "hetzner-de", Name: "Hetzner Germany", URL: "https://speed.hetzner.de/10GB.bin"},
-	{ID: "ovh-fr", Name: "OVH France", URL: "http://proof.ovh.net/files/10Gb.dat"},
-	{ID: "tele2-se", Name: "Tele2 Sweden", URL: "https://ash-speed.hetzner.com/10GB.bin"},
+	{ID: "hetzner-us", Name: "Hetzner US", URL: "https://ash-speed.hetzner.com/10GB.bin"},
+	{ID: "hetzner-fi", Name: "Hetzner Finland", URL: "https://hel1-speed.hetzner.com/10GB.bin"},
 }
 
 type CDNSource struct {
@@ -42,6 +42,9 @@ func (c *CDNSource) Download(ctx context.Context, server Server) (io.ReadCloser,
 	if err != nil {
 		return nil, err
 	}
+	// Request a large range to keep the connection streaming continuously.
+	// When the range completes, the worker loop will re-request.
+	req.Header.Set("Range", "bytes=0-104857599") // 100MB chunk
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err

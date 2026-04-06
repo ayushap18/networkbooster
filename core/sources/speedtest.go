@@ -12,26 +12,33 @@ import (
 const defaultSpeedtestServerListURL = "https://www.speedtest.net/speedtest-servers-static.php"
 
 var bundledSpeedtestServers = []Server{
-	{ID: "st-nyc-1", Name: "New York, US (Speedtest)", URL: "http://speedtest.net/api/js/servers?engine=js&search=new+york&limit=1"},
-	{ID: "st-lax-1", Name: "Los Angeles, US (Lumen)", URL: "http://lax.speedtest.net/speedtest/upload.php"},
-	{ID: "st-chi-1", Name: "Chicago, US (Comcast)", URL: "http://ord.speedtest.net/speedtest/upload.php"},
-	{ID: "st-lon-1", Name: "London, UK (Vodafone)", URL: "http://lon.speedtest.net/speedtest/upload.php"},
-	{ID: "st-fra-1", Name: "Frankfurt, DE (Deutsche Telekom)", URL: "http://fra.speedtest.net/speedtest/upload.php"},
-	{ID: "st-ams-1", Name: "Amsterdam, NL (KPN)", URL: "http://ams.speedtest.net/speedtest/upload.php"},
-	{ID: "st-par-1", Name: "Paris, FR (Orange)", URL: "http://par.speedtest.net/speedtest/upload.php"},
-	{ID: "st-sin-1", Name: "Singapore (Singtel)", URL: "http://sin.speedtest.net/speedtest/upload.php"},
-	{ID: "st-tok-1", Name: "Tokyo, JP (NTT)", URL: "http://tok.speedtest.net/speedtest/upload.php"},
-	{ID: "st-syd-1", Name: "Sydney, AU (Telstra)", URL: "http://syd.speedtest.net/speedtest/upload.php"},
-	{ID: "st-sao-1", Name: "São Paulo, BR (Claro)", URL: "http://sao.speedtest.net/speedtest/upload.php"},
-	{ID: "st-dxb-1", Name: "Dubai, AE (Etisalat)", URL: "http://dxb.speedtest.net/speedtest/upload.php"},
-	{ID: "st-hkg-1", Name: "Hong Kong (PCCW)", URL: "http://hkg.speedtest.net/speedtest/upload.php"},
-	{ID: "st-mum-1", Name: "Mumbai, IN (Jio)", URL: "http://mum.speedtest.net/speedtest/upload.php"},
-	{ID: "st-sea-1", Name: "Seattle, US (CenturyLink)", URL: "http://sea.speedtest.net/speedtest/upload.php"},
-	{ID: "st-dfw-1", Name: "Dallas, US (AT&T)", URL: "http://dfw.speedtest.net/speedtest/upload.php"},
-	{ID: "st-mia-1", Name: "Miami, US (FPL FiberNet)", URL: "http://mia.speedtest.net/speedtest/upload.php"},
-	{ID: "st-yyz-1", Name: "Toronto, CA (Rogers)", URL: "http://yyz.speedtest.net/speedtest/upload.php"},
-	{ID: "st-mad-1", Name: "Madrid, ES (Telefonica)", URL: "http://mad.speedtest.net/speedtest/upload.php"},
-	{ID: "st-zrh-1", Name: "Zurich, CH (Swisscom)", URL: "http://zrh.speedtest.net/speedtest/upload.php"},
+	// Hetzner speed test servers — reliable, support range requests, large files
+	{ID: "st-hetzner-de", Name: "Hetzner Germany", URL: "https://speed.hetzner.de/10GB.bin"},
+	{ID: "st-hetzner-us", Name: "Hetzner US (Ashburn)", URL: "https://ash-speed.hetzner.com/10GB.bin"},
+	{ID: "st-hetzner-fi", Name: "Hetzner Finland", URL: "https://hel1-speed.hetzner.com/10GB.bin"},
+	// Scaleway test files
+	{ID: "st-scaleway-fr", Name: "Scaleway France", URL: "https://multi.fr.apt.scaleway.com/linux/debian/ls-lR.gz"},
+	// Linode/Akamai speed test servers
+	{ID: "st-linode-us-east", Name: "Linode US East", URL: "https://speedtest.newark.linode.com/100MB-newark.bin"},
+	{ID: "st-linode-us-west", Name: "Linode US West", URL: "https://speedtest.fremont.linode.com/100MB-fremont.bin"},
+	{ID: "st-linode-eu", Name: "Linode EU (London)", URL: "https://speedtest.london.linode.com/100MB-london.bin"},
+	{ID: "st-linode-ap", Name: "Linode AP (Singapore)", URL: "https://speedtest.singapore.linode.com/100MB-singapore.bin"},
+	{ID: "st-linode-jp", Name: "Linode JP (Tokyo)", URL: "https://speedtest.tokyo2.linode.com/100MB-tokyo2.bin"},
+	// Vultr test files
+	{ID: "st-vultr-us", Name: "Vultr US (NJ)", URL: "https://nj-us-ping.vultr.com/vultr.com.100MB.bin"},
+	{ID: "st-vultr-eu", Name: "Vultr EU (Amsterdam)", URL: "https://ams-nl-ping.vultr.com/vultr.com.100MB.bin"},
+	{ID: "st-vultr-ap", Name: "Vultr AP (Singapore)", URL: "https://sgp-ping.vultr.com/vultr.com.100MB.bin"},
+	{ID: "st-vultr-au", Name: "Vultr AU (Sydney)", URL: "https://syd-au-ping.vultr.com/vultr.com.100MB.bin"},
+	{ID: "st-vultr-jp", Name: "Vultr JP (Tokyo)", URL: "https://hnd-jp-ping.vultr.com/vultr.com.100MB.bin"},
+	// OVH test files
+	{ID: "st-ovh-fr", Name: "OVH France", URL: "https://proof.ovh.net/files/100Mb.dat"},
+	{ID: "st-ovh-ca", Name: "OVH Canada", URL: "https://proof.ovh.ca/files/100Mb.dat"},
+	// Telia carrier test
+	{ID: "st-telia-se", Name: "Telia Sweden", URL: "http://speedtest.tele2.net/100MB.zip"},
+	// Clouvider looking glass
+	{ID: "st-clouvider-uk", Name: "Clouvider UK", URL: "https://lon.speedtest.clouvider.net/backend/garbage/100MB.bin"},
+	{ID: "st-clouvider-us", Name: "Clouvider US", URL: "https://dal.speedtest.clouvider.net/backend/garbage/100MB.bin"},
+	{ID: "st-clouvider-de", Name: "Clouvider DE", URL: "https://fra.speedtest.clouvider.net/backend/garbage/100MB.bin"},
 }
 
 // xmlSettings mirrors the Ookla speedtest-servers XML structure.
@@ -67,7 +74,7 @@ func NewSpeedtestSourceWithURL(serverListURL string) *SpeedtestSource {
 	return &SpeedtestSource{
 		serverListURL: serverListURL,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 0, // no timeout — workers manage their own lifecycle via context
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 64,
 				IdleConnTimeout:     90 * time.Second,
@@ -137,6 +144,7 @@ func (s *SpeedtestSource) Download(ctx context.Context, server Server) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Range", "bytes=0-104857599") // 100MB chunk
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
