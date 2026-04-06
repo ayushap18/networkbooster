@@ -13,6 +13,11 @@ const (
 	DirectionUpload
 )
 
+type ServerStat struct {
+	DownloadBytes int64
+	UploadBytes   int64
+}
+
 type Snapshot struct {
 	DownloadMbps       float64
 	UploadMbps         float64
@@ -20,6 +25,16 @@ type Snapshot struct {
 	TotalUploadBytes   int64
 	ActiveConnections  int
 	Elapsed            time.Duration
+	PeakDownloadMbps   float64
+	PeakUploadMbps     float64
+	AvgDownloadMbps    float64
+	AvgUploadMbps      float64
+	ServerStats        map[string]ServerStat
+}
+
+type serverAccum struct {
+	download int64
+	upload   int64
 }
 
 type Collector struct {
@@ -34,12 +49,22 @@ type Collector struct {
 
 	connections map[string]struct{}
 	startTime   time.Time
+
+	// Per-server tracking
+	serverStats map[string]*serverAccum
+
+	// Peak/avg tracking
+	peakDl, peakUl       float64
+	speedSamples         int
+	totalDlMbps          float64
+	totalUlMbps          float64
 }
 
 func NewCollector() *Collector {
 	now := time.Now()
 	return &Collector{
 		connections: make(map[string]struct{}),
+		serverStats: make(map[string]*serverAccum),
 		startTime:   now,
 		windowStart: now,
 	}
@@ -53,6 +78,24 @@ func (c *Collector) RecordBytes(dir Direction, n int64) {
 	case DirectionUpload:
 		c.totalUpload.Add(n)
 		c.windowUpload.Add(n)
+	}
+}
+
+func (c *Collector) RecordServerBytes(serverID string, dir Direction, n int64) {
+	c.RecordBytes(dir, n)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	acc, ok := c.serverStats[serverID]
+	if !ok {
+		acc = &serverAccum{}
+		c.serverStats[serverID] = acc
+	}
+	switch dir {
+	case DirectionDownload:
+		acc.download += n
+	case DirectionUpload:
+		acc.upload += n
 	}
 }
 
@@ -81,12 +124,40 @@ func (c *Collector) Snapshot() Snapshot {
 
 	dlBytes := c.windowDownload.Swap(0)
 	ulBytes := c.windowUpload.Swap(0)
-	c.mu.Lock()
-	c.windowStart = now
-	c.mu.Unlock()
 
 	dlMbps := float64(dlBytes) * 8.0 / (elapsed * 1_000_000)
 	ulMbps := float64(ulBytes) * 8.0 / (elapsed * 1_000_000)
+
+	c.mu.Lock()
+	c.windowStart = now
+
+	// Update peak
+	if dlMbps > c.peakDl {
+		c.peakDl = dlMbps
+	}
+	if ulMbps > c.peakUl {
+		c.peakUl = ulMbps
+	}
+
+	// Update running average
+	c.speedSamples++
+	c.totalDlMbps += dlMbps
+	c.totalUlMbps += ulMbps
+
+	peakDl := c.peakDl
+	peakUl := c.peakUl
+	avgDl := c.totalDlMbps / float64(c.speedSamples)
+	avgUl := c.totalUlMbps / float64(c.speedSamples)
+
+	// Copy server stats
+	serverStats := make(map[string]ServerStat, len(c.serverStats))
+	for id, acc := range c.serverStats {
+		serverStats[id] = ServerStat{
+			DownloadBytes: acc.download,
+			UploadBytes:   acc.upload,
+		}
+	}
+	c.mu.Unlock()
 
 	return Snapshot{
 		DownloadMbps:       dlMbps,
@@ -95,6 +166,11 @@ func (c *Collector) Snapshot() Snapshot {
 		TotalUploadBytes:   c.totalUpload.Load(),
 		ActiveConnections:  connCount,
 		Elapsed:            now.Sub(c.startTime),
+		PeakDownloadMbps:   peakDl,
+		PeakUploadMbps:     peakUl,
+		AvgDownloadMbps:    avgDl,
+		AvgUploadMbps:      avgUl,
+		ServerStats:        serverStats,
 	}
 }
 
@@ -106,6 +182,12 @@ func (c *Collector) Reset() {
 
 	c.mu.Lock()
 	c.connections = make(map[string]struct{})
+	c.serverStats = make(map[string]*serverAccum)
+	c.peakDl = 0
+	c.peakUl = 0
+	c.speedSamples = 0
+	c.totalDlMbps = 0
+	c.totalUlMbps = 0
 	now := time.Now()
 	c.startTime = now
 	c.windowStart = now

@@ -41,6 +41,37 @@ func TestCollector_ConnectionCount(t *testing.T) {
 	assert.Equal(t, 1, c.Snapshot().ActiveConnections)
 }
 
+func TestCollector_PerServerStats(t *testing.T) {
+	c := metrics.NewCollector()
+
+	c.RecordServerBytes("server-1", metrics.DirectionDownload, 1000)
+	c.RecordServerBytes("server-1", metrics.DirectionDownload, 500)
+	c.RecordServerBytes("server-2", metrics.DirectionDownload, 2000)
+
+	snap := c.Snapshot()
+	assert.Equal(t, int64(3500), snap.TotalDownloadBytes)
+
+	servers := snap.ServerStats
+	assert.Len(t, servers, 2)
+	assert.Equal(t, int64(1500), servers["server-1"].DownloadBytes)
+	assert.Equal(t, int64(2000), servers["server-2"].DownloadBytes)
+}
+
+func TestCollector_PeakSpeed(t *testing.T) {
+	c := metrics.NewCollector()
+
+	c.RecordBytes(metrics.DirectionDownload, 5*1024*1024)
+	time.Sleep(150 * time.Millisecond)
+	c.Snapshot() // first reading
+
+	c.RecordBytes(metrics.DirectionDownload, 1*1024*1024)
+	time.Sleep(150 * time.Millisecond)
+	snap2 := c.Snapshot()
+
+	assert.GreaterOrEqual(t, snap2.PeakDownloadMbps, snap2.DownloadMbps)
+	assert.Greater(t, snap2.AvgDownloadMbps, float64(0))
+}
+
 func TestCollector_Reset(t *testing.T) {
 	c := metrics.NewCollector()
 	c.RecordBytes(metrics.DirectionDownload, 1000)
