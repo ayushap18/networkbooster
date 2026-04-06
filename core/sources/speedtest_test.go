@@ -59,11 +59,11 @@ func TestSpeedtestSource_LiveDiscovery(t *testing.T) {
 
 	require.Len(t, servers, 2, "should have parsed 2 servers from XML")
 
-	assert.Equal(t, "st-1001", servers[0].ID)
+	assert.Equal(t, "ookla-1001", servers[0].ID)
 	assert.Equal(t, "http://example.com/speedtest", servers[0].URL)
 	assert.Contains(t, servers[0].Name, "TestISP")
 
-	assert.Equal(t, "st-1002", servers[1].ID)
+	assert.Equal(t, "ookla-1002", servers[1].ID)
 	assert.Equal(t, "http://example2.com/speedtest", servers[1].URL)
 	assert.Contains(t, servers[1].Name, "TestISP2")
 }

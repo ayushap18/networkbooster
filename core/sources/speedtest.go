@@ -109,7 +109,7 @@ func (s *SpeedtestSource) fetchLiveServers() ([]Server, error) {
 	}
 
 	var settings xmlSettings
-	if err := xml.NewDecoder(resp.Body).Decode(&settings); err != nil {
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&settings); err != nil {
 		return nil, err
 	}
 
@@ -123,7 +123,7 @@ func (s *SpeedtestSource) fetchLiveServers() ([]Server, error) {
 			name = xs.Sponsor + " – " + xs.Name + ", " + xs.Country
 		}
 		servers = append(servers, Server{
-			ID:   "st-" + xs.ID,
+			ID:   "ookla-" + xs.ID,
 			Name: name,
 			URL:  xs.URL,
 		})
