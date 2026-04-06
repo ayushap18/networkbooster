@@ -41,6 +41,32 @@ func TestConfig_LoadMissing_ReturnsDefault(t *testing.T) {
 	assert.Equal(t, config.Default(), cfg)
 }
 
+func TestConfig_AdaptiveDefaults(t *testing.T) {
+	cfg := config.Default()
+	assert.False(t, cfg.Adaptive.Enabled)
+	assert.Equal(t, 5, cfg.Adaptive.IntervalSecs)
+	assert.Equal(t, 2, cfg.Adaptive.MinConnections)
+	assert.Equal(t, 0, cfg.Adaptive.MaxConnections)
+}
+
+func TestConfig_AdaptiveFromYAML(t *testing.T) {
+	yamlData := `
+adaptive:
+  enabled: true
+  interval_secs: 10
+  min_connections: 4
+  max_connections: 32
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(tmpFile, []byte(yamlData), 0644)
+	cfg, err := config.Load(tmpFile)
+	require.NoError(t, err)
+	assert.True(t, cfg.Adaptive.Enabled)
+	assert.Equal(t, 10, cfg.Adaptive.IntervalSecs)
+	assert.Equal(t, 4, cfg.Adaptive.MinConnections)
+	assert.Equal(t, 32, cfg.Adaptive.MaxConnections)
+}
+
 func TestConfig_LoadFromEnvPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

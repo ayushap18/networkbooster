@@ -17,12 +17,28 @@ type SafetyConfig struct {
 	MaxConnections   int     `yaml:"max_connections"`
 }
 
+type ScheduleEntry struct {
+	Days    []string `yaml:"days"`
+	Start   string   `yaml:"start"`
+	End     string   `yaml:"end"`
+	Profile string   `yaml:"profile"`
+}
+
+type AdaptiveConfig struct {
+	Enabled        bool `yaml:"enabled"`
+	IntervalSecs   int  `yaml:"interval_secs"`
+	MinConnections int  `yaml:"min_connections"`
+	MaxConnections int  `yaml:"max_connections"`
+}
+
 type Config struct {
-	Mode          string       `yaml:"mode"`
-	Profile       string       `yaml:"profile"`
-	Connections   int          `yaml:"connections"`
-	SelfHostedURL string       `yaml:"self_hosted_url,omitempty"`
-	Safety        SafetyConfig `yaml:"safety"`
+	Mode          string          `yaml:"mode"`
+	Profile       string          `yaml:"profile"`
+	Connections   int             `yaml:"connections"`
+	SelfHostedURL string          `yaml:"self_hosted_url,omitempty"`
+	Safety        SafetyConfig    `yaml:"safety"`
+	Adaptive      AdaptiveConfig  `yaml:"adaptive"`
+	Schedule      []ScheduleEntry `yaml:"schedule,omitempty"`
 }
 
 func Default() Config {
@@ -34,6 +50,12 @@ func Default() Config {
 			MaxCPUPercent:  80,
 			MaxTempCelsius: 85,
 			MaxConnections: 64,
+		},
+		Adaptive: AdaptiveConfig{
+			Enabled:        false,
+			IntervalSecs:   5,
+			MinConnections: 2,
+			MaxConnections: 0,
 		},
 	}
 }
