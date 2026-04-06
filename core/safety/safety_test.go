@@ -123,3 +123,65 @@ func TestTempCheck_NoSensor(t *testing.T) {
 	result := c.Evaluate(safety.State{TempCelsius: 0})
 	assert.Equal(t, safety.ActionNone, result.Action)
 }
+
+// --- Monitor ---
+
+type fakeCheck struct {
+	name   string
+	result safety.CheckResult
+}
+
+func (f *fakeCheck) Name() string                      { return f.name }
+func (f *fakeCheck) Evaluate(s safety.State) safety.CheckResult { return f.result }
+
+func TestMonitor_RunsChecks(t *testing.T) {
+	alwaysThrottle := &fakeCheck{
+		name:   "test",
+		result: safety.CheckResult{Action: safety.ActionThrottle, Target: 2, Reason: "test"},
+	}
+
+	m := safety.NewMonitor([]safety.Check{alwaysThrottle})
+	result := m.Evaluate(safety.State{ActiveConnections: 8})
+	assert.Equal(t, safety.ActionThrottle, result.Action)
+	assert.Equal(t, 2, result.Target)
+}
+
+func TestMonitor_MostSevereWins(t *testing.T) {
+	throttle := &fakeCheck{
+		name:   "throttle",
+		result: safety.CheckResult{Action: safety.ActionThrottle, Target: 4},
+	}
+	pause := &fakeCheck{
+		name:   "pause",
+		result: safety.CheckResult{Action: safety.ActionPause, Reason: "critical"},
+	}
+
+	m := safety.NewMonitor([]safety.Check{throttle, pause})
+	result := m.Evaluate(safety.State{})
+	assert.Equal(t, safety.ActionPause, result.Action)
+}
+
+func TestMonitor_AllNone(t *testing.T) {
+	ok1 := &fakeCheck{name: "ok1", result: safety.CheckResult{Action: safety.ActionNone}}
+	ok2 := &fakeCheck{name: "ok2", result: safety.CheckResult{Action: safety.ActionNone}}
+
+	m := safety.NewMonitor([]safety.Check{ok1, ok2})
+	result := m.Evaluate(safety.State{})
+	assert.Equal(t, safety.ActionNone, result.Action)
+}
+
+func TestMonitor_LowestThrottleTarget(t *testing.T) {
+	t1 := &fakeCheck{
+		name:   "t1",
+		result: safety.CheckResult{Action: safety.ActionThrottle, Target: 6},
+	}
+	t2 := &fakeCheck{
+		name:   "t2",
+		result: safety.CheckResult{Action: safety.ActionThrottle, Target: 3},
+	}
+
+	m := safety.NewMonitor([]safety.Check{t1, t2})
+	result := m.Evaluate(safety.State{})
+	assert.Equal(t, safety.ActionThrottle, result.Action)
+	assert.Equal(t, 3, result.Target, "should pick the most conservative target")
+}
