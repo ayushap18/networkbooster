@@ -29,6 +29,11 @@ type Status struct {
 	Snapshot metrics.Snapshot
 }
 
+type workerEntry struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 type Engine struct {
 	registry  *sources.Registry
 	opts      Options
@@ -38,8 +43,10 @@ type Engine struct {
 	running    bool
 	paused     bool
 	mode       Mode
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	parentCtx  context.Context
+	parentStop context.CancelFunc
+	workers    []workerEntry
+	workerSeq  int
 	discovered []sources.DiscoveredServer
 }
 
@@ -75,65 +82,86 @@ func (e *Engine) Start(mode Mode) error {
 	e.paused = false
 	e.mode = mode
 	e.discovered = discovered
+	e.workerSeq = 0
+	e.workers = nil
 
-	e.launchWorkers()
+	e.parentCtx, e.parentStop = context.WithCancel(context.Background())
+
+	for i := 0; i < e.opts.Connections; i++ {
+		e.addWorkerLocked()
+	}
 	return nil
 }
 
-// launchWorkers starts worker goroutines. Must be called with e.mu held.
-func (e *Engine) launchWorkers() {
-	ctx, cancel := context.WithCancel(context.Background())
-	e.cancel = cancel
+// addWorkerLocked launches ONE worker with its own child context of parentCtx.
+// Must be called with e.mu held.
+func (e *Engine) addWorkerLocked() {
+	ctx, cancel := context.WithCancel(e.parentCtx)
+	done := make(chan struct{})
 
-	for i := 0; i < e.opts.Connections; i++ {
-		ds := e.discovered[i%len(e.discovered)]
-		workerID := fmt.Sprintf("worker-%d", i)
+	i := e.workerSeq
+	e.workerSeq++
 
-		switch e.mode {
-		case ModeDownload:
-			w := NewWorker(workerID, ds.Source, ds.Server, e.collector)
-			e.wg.Add(1)
+	ds := e.discovered[i%len(e.discovered)]
+	workerID := fmt.Sprintf("worker-%d", i)
+
+	switch e.mode {
+	case ModeDownload:
+		w := NewWorker(workerID, ds.Source, ds.Server, e.collector)
+		go func() {
+			defer close(done)
+			w.RunDownload(ctx)
+		}()
+	case ModeUpload:
+		w := NewWorker(workerID, ds.Source, ds.Server, e.collector)
+		go func() {
+			defer close(done)
+			w.RunUpload(ctx)
+		}()
+	case ModeBidirectional:
+		totalConns := e.opts.Connections
+		if i < (totalConns+1)/2 {
+			dlServer := sources.Server{
+				ID:      ds.Server.ID,
+				Name:    ds.Server.Name,
+				URL:     ds.Server.URL + "/download",
+				Latency: ds.Server.Latency,
+			}
+			w := NewWorker(workerID+"-dl", ds.Source, dlServer, e.collector)
 			go func() {
-				defer e.wg.Done()
+				defer close(done)
 				w.RunDownload(ctx)
 			}()
-		case ModeUpload:
-			w := NewWorker(workerID, ds.Source, ds.Server, e.collector)
-			e.wg.Add(1)
+		} else {
+			ulServer := sources.Server{
+				ID:      ds.Server.ID,
+				Name:    ds.Server.Name,
+				URL:     ds.Server.URL + "/upload",
+				Latency: ds.Server.Latency,
+			}
+			w := NewWorker(workerID+"-ul", ds.Source, ulServer, e.collector)
 			go func() {
-				defer e.wg.Done()
+				defer close(done)
 				w.RunUpload(ctx)
 			}()
-		case ModeBidirectional:
-			if i < (e.opts.Connections+1)/2 {
-				dlServer := sources.Server{
-					ID:      ds.Server.ID,
-					Name:    ds.Server.Name,
-					URL:     ds.Server.URL + "/download",
-					Latency: ds.Server.Latency,
-				}
-				w := NewWorker(workerID+"-dl", ds.Source, dlServer, e.collector)
-				e.wg.Add(1)
-				go func() {
-					defer e.wg.Done()
-					w.RunDownload(ctx)
-				}()
-			} else {
-				ulServer := sources.Server{
-					ID:      ds.Server.ID,
-					Name:    ds.Server.Name,
-					URL:     ds.Server.URL + "/upload",
-					Latency: ds.Server.Latency,
-				}
-				w := NewWorker(workerID+"-ul", ds.Source, ulServer, e.collector)
-				e.wg.Add(1)
-				go func() {
-					defer e.wg.Done()
-					w.RunUpload(ctx)
-				}()
-			}
 		}
 	}
+
+	e.workers = append(e.workers, workerEntry{cancel: cancel, done: done})
+}
+
+// removeLastWorkerLocked cancels the most recently added worker (LIFO) and waits for it to finish.
+// Must be called with e.mu held. Releases and re-acquires the lock while waiting.
+func (e *Engine) removeLastWorkerLocked() {
+	if len(e.workers) == 0 {
+		return
+	}
+	last := e.workers[len(e.workers)-1]
+	e.workers = e.workers[:len(e.workers)-1]
+	last.cancel()
+	e.mu.Unlock()
+	<-last.done
+	e.mu.Lock()
 }
 
 func (e *Engine) Stop() error {
@@ -142,10 +170,14 @@ func (e *Engine) Stop() error {
 		e.mu.Unlock()
 		return errors.New("engine is not running")
 	}
-	e.cancel()
+	e.parentStop()
+	workers := e.workers
+	e.workers = nil
 	e.mu.Unlock()
 
-	e.wg.Wait()
+	for _, w := range workers {
+		<-w.done
+	}
 
 	e.mu.Lock()
 	e.running = false
@@ -162,10 +194,14 @@ func (e *Engine) Pause() {
 		e.mu.Unlock()
 		return
 	}
-	e.cancel()
+	e.parentStop()
+	workers := e.workers
+	e.workers = nil
 	e.mu.Unlock()
 
-	e.wg.Wait()
+	for _, w := range workers {
+		<-w.done
+	}
 
 	e.mu.Lock()
 	e.paused = true
@@ -180,7 +216,12 @@ func (e *Engine) Resume() {
 		return
 	}
 	e.paused = false
-	e.launchWorkers()
+	e.workerSeq = 0
+	e.workers = nil
+	e.parentCtx, e.parentStop = context.WithCancel(context.Background())
+	for i := 0; i < e.opts.Connections; i++ {
+		e.addWorkerLocked()
+	}
 }
 
 // IsPaused returns whether the engine is paused.
@@ -188,6 +229,36 @@ func (e *Engine) IsPaused() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.paused
+}
+
+// SetConnections adjusts the worker count dynamically.
+// No-op if the engine is paused or stopped.
+func (e *Engine) SetConnections(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.running || e.paused || n < 0 {
+		return
+	}
+
+	current := len(e.workers)
+	if n > current {
+		for i := 0; i < n-current; i++ {
+			e.addWorkerLocked()
+		}
+	} else if n < current {
+		for i := 0; i < current-n; i++ {
+			e.removeLastWorkerLocked()
+		}
+	}
+	e.opts.Connections = n
+}
+
+// ConnectionCount returns the current number of workers.
+func (e *Engine) ConnectionCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.workers)
 }
 
 func (e *Engine) Status() Status {
